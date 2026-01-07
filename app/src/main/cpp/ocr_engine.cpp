@@ -37,9 +37,9 @@ namespace ppocrv5 {
         constexpr int kWarmupIterations = 3;
         constexpr int kWarmupImageSize = 128;
 
-        constexpr float kMinBoxArea = 100.0f;
+        constexpr float kMinBoxArea = 4.0f;
         constexpr float kMinConfidenceThreshold = 0.0f;
-        constexpr int kMaxBoxesPerFrame = 50;
+        constexpr int kMaxBoxesPerFrame = 200;
 
         int GetFallbackStartIndex(AcceleratorType requested) {
             switch (requested) {
@@ -71,6 +71,50 @@ namespace ppocrv5 {
             std::sort(indices.begin(), indices.end(), [&boxes](size_t a, size_t b) {
                 return boxes[a].width * boxes[a].height > boxes[b].width * boxes[b].height;
             });
+        }
+
+        // Precision merging: Only merge if boxes are extremely close
+        void MergeNearbyBoxesPrecision(std::vector<RotatedRect> &boxes) {
+            if (boxes.size() < 2) return;
+
+            bool merged = true;
+            while (merged) {
+                merged = false;
+                for (size_t i = 0; i < boxes.size(); ++i) {
+                    for (size_t j = i + 1; j < boxes.size(); ++j) {
+                        auto &b1 = boxes[i];
+                        auto &b2 = boxes[j];
+
+                        float h_avg = (b1.height + b2.height) / 2.0f;
+                        float dy = std::abs(b1.center_y - b2.center_y);
+
+                        // Strict Y-alignment: must be on the same baseline
+                        if (dy < h_avg * 0.15f) {
+                            float x_dist = std::abs(b1.center_x - b2.center_x) - (b1.width + b2.width) / 2.0f;
+
+                            // Goldilocks zone: only merge if distance is less than 20% of character height
+                            // This bridges character gaps but keeps buttons separate
+                            if (x_dist < h_avg * 0.20f) {
+                                float min_x = std::min(b1.center_x - b1.width/2, b2.center_x - b2.width/2);
+                                float max_x = std::max(b1.center_x + b1.width/2, b2.center_x + b2.width/2);
+                                float min_y = std::min(b1.center_y - b1.height/2, b2.center_y - b2.height/2);
+                                float max_y = std::max(b1.center_y + b1.height/2, b2.center_y + b2.height/2);
+
+                                b1.center_x = (min_x + max_x) / 2.0f;
+                                b1.center_y = (min_y + max_y) / 2.0f;
+                                b1.width = max_x - min_x;
+                                b1.height = max_y - min_y;
+                                b1.confidence = std::max(b1.confidence, b2.confidence);
+
+                                boxes.erase(boxes.begin() + j);
+                                merged = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (merged) break;
+                }
+            }
         }
 
     }  // namespace
@@ -139,6 +183,9 @@ namespace ppocrv5 {
             benchmark_.fps = (benchmark_.total_time_ms > 0.0f) ? (1000.0f / benchmark_.total_time_ms) : 0.0f;
             return {};
         }
+
+        // Apply Precision merging to bridge character gaps without merging separate buttons
+        MergeNearbyBoxesPrecision(boxes);
 
         std::vector<RotatedRect> filtered_boxes;
         filtered_boxes.reserve(std::min(boxes.size(), static_cast<size_t>(kMaxBoxesPerFrame)));

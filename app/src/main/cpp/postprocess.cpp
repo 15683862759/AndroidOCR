@@ -42,11 +42,10 @@ namespace ppocrv5::postprocess {
     namespace {
 
         constexpr int kDownsampleFactor = 1;
-        constexpr int kMinComponentPixels = 3;
+        constexpr int kMinComponentPixels = 2;
         constexpr int kMaxBoundaryPoints = 200;
         constexpr int kMaxContours = 1500;
 
-        // Use 8-neighborhood for better connectivity (merges colored text fragments)
         constexpr int kNeighborDx8[] = {1, -1, 0, 0, 1, 1, -1, -1};
         constexpr int kNeighborDy8[] = {0, 0, 1, -1, 1, -1, 1, -1};
 
