@@ -41,13 +41,14 @@ namespace ppocrv5::postprocess {
 
     namespace {
 
-        constexpr int kDownsampleFactor = 4;
+        constexpr int kDownsampleFactor = 1;
         constexpr int kMinComponentPixels = 3;
         constexpr int kMaxBoundaryPoints = 200;
-        constexpr int kMaxContours = 500;
+        constexpr int kMaxContours = 1500;
 
-        constexpr int kNeighborDx4[] = {1, -1, 0, 0};
-        constexpr int kNeighborDy4[] = {0, 0, 1, -1};
+        // Use 8-neighborhood for better connectivity (merges colored text fragments)
+        constexpr int kNeighborDx8[] = {1, -1, 0, 0, 1, 1, -1, -1};
+        constexpr int kNeighborDy8[] = {0, 0, 1, -1, 1, -1, 1, -1};
 
         inline bool is_valid(int x, int y, int width, int height) {
             return x >= 0 && x < width && y >= 0 && y < height;
@@ -59,8 +60,8 @@ namespace ppocrv5::postprocess {
 
         inline bool is_boundary_pixel(const uint8_t *map, int x, int y, int width, int height) {
             for (int d = 0; d < 4; ++d) {
-                int nx = x + kNeighborDx4[d];
-                int ny = y + kNeighborDy4[d];
+                int nx = x + kNeighborDx8[d];
+                int ny = y + kNeighborDy8[d];
                 if (!is_valid(nx, ny, width, height) || pixel_at(map, nx, ny, width) == 0) {
                     return true;
                 }
@@ -148,55 +149,10 @@ namespace ppocrv5::postprocess {
 
         void downsample_binary_map(const uint8_t *src, int src_w, int src_h,
                                    uint8_t *dst, int dst_w, int dst_h, int factor) {
-#if USE_NEON
-            if (factor == 4 && dst_w >= 4) {
-                for (int dy = 0; dy < dst_h; ++dy) {
-                    int sy_start = dy * factor;
-                    int sy_end = std::min(sy_start + factor, src_h);
-
-                    int dx = 0;
-                    for (; dx + 4 <= dst_w; dx += 4) {
-                        uint8x16_t max_vals = vdupq_n_u8(0);
-
-                        for (int sy = sy_start; sy < sy_end; ++sy) {
-                            const uint8_t *row = src + sy * src_w + dx * factor;
-                            uint8x16_t vals = vld1q_u8(row);
-                            max_vals = vmaxq_u8(max_vals, vals);
-                        }
-
-                        uint8_t results[4];
-                        uint8_t temp[16];
-                        vst1q_u8(temp, max_vals);
-                        for (int i = 0; i < 4; ++i) {
-                            uint8_t m = temp[i * 4];
-                            m = std::max(m, temp[i * 4 + 1]);
-                            m = std::max(m, temp[i * 4 + 2]);
-                            m = std::max(m, temp[i * 4 + 3]);
-                            results[i] = m;
-                        }
-
-                        dst[dy * dst_w + dx + 0] = results[0];
-                        dst[dy * dst_w + dx + 1] = results[1];
-                        dst[dy * dst_w + dx + 2] = results[2];
-                        dst[dy * dst_w + dx + 3] = results[3];
-                    }
-
-                    for (; dx < dst_w; ++dx) {
-                        uint8_t max_val = 0;
-                        int sx_start = dx * factor;
-                        int sx_end = std::min(sx_start + factor, src_w);
-
-                        for (int sy = sy_start; sy < sy_end; ++sy) {
-                            for (int sx = sx_start; sx < sx_end; ++sx) {
-                                max_val = std::max(max_val, src[sy * src_w + sx]);
-                            }
-                        }
-                        dst[dy * dst_w + dx] = max_val;
-                    }
-                }
+            if (factor == 1) {
+                std::memcpy(dst, src, src_w * src_h);
                 return;
             }
-#endif
             for (int dy = 0; dy < dst_h; ++dy) {
                 for (int dx = 0; dx < dst_w; ++dx) {
                     uint8_t max_val = 0;
@@ -253,9 +209,9 @@ namespace ppocrv5::postprocess {
                                                });
                         }
 
-                        for (int d = 0; d < 4; ++d) {
-                            int nx = cx + kNeighborDx4[d];
-                            int ny = cy + kNeighborDy4[d];
+                        for (int d = 0; d < 8; ++d) {
+                            int nx = cx + kNeighborDx8[d];
+                            int ny = cy + kNeighborDy8[d];
                             if (is_valid(nx, ny, ds_width, ds_height) &&
                                 pixel_at(ds_map.data(), nx, ny, ds_width) > 0 &&
                                 labels[ny * ds_width + nx] == 0) {
@@ -268,7 +224,6 @@ namespace ppocrv5::postprocess {
                     if (pixel_count >= kMinComponentPixels && boundary.size() >= 4) {
                         contours.push_back(std::move(boundary));
                         if (contours.size() >= kMaxContours) {
-                            LOGD(TAG, "FindContours: reached max contour limit (%d)", kMaxContours);
                             goto done;
                         }
                     }
@@ -276,10 +231,6 @@ namespace ppocrv5::postprocess {
             }
         }
         done:
-
-        LOGD(TAG, "FindContours (optimized): found %d components, %zu valid contours",
-             current_label, contours.size());
-
         return contours;
     }
 
