@@ -7,9 +7,7 @@ plugins {
 
 android {
   namespace = "me.fleey.ppocrv5"
-  compileSdk {
-    version = release(36)
-  }
+  compileSdk = 36
   ndkVersion = "29.0.14206865"
 
   defaultConfig {
@@ -32,11 +30,22 @@ android {
     }
   }
 
+  signingConfigs {
+    create("release") {
+      storeFile = file("release.keystore")
+      // 从 gradle.properties 中动态读取
+      storePassword = project.findProperty("RELEASE_STORE_PASSWORD")?.toString() ?: ""
+      keyAlias = project.findProperty("RELEASE_KEY_ALIAS")?.toString() ?: "ppocr_alias"
+      keyPassword = project.findProperty("RELEASE_KEY_PASSWORD")?.toString() ?: ""
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      signingConfig = signingConfigs.getByName("release")
     }
   }
   compileOptions {
