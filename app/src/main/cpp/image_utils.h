@@ -18,19 +18,24 @@
 #define PPOCRV5_IMAGE_UTILS_H
 
 #include <cstdint>
-#include <vector>
 
 namespace ppocrv5::image_utils {
 
     void ResizeBilinear(const uint8_t *src, int src_w, int src_h, int src_stride,
                         uint8_t *dst, int dst_w, int dst_h);
 
-    void ResizeLetterbox(const uint8_t *src, int src_w, int src_h, int src_stride,
-                         uint8_t *dst, int dst_w, int dst_h, float &scale, int &pad_w, int &pad_h);
-
     void NormalizeImageNet(const uint8_t *src, int w, int h, int stride, float *dst);
 
     void NormalizeRecognition(const uint8_t *src, int w, int h, int stride, float *dst);
+
+    void PerspectiveTransform(const uint8_t *src, int src_w, int src_h, int stride,
+                              const float *src_points, float *dst, int dst_w, int dst_h);
+
+    void PerspectiveTransformFloat32Raw(const uint8_t *src, int src_w, int src_h, int stride,
+                                        const float *src_points, float *dst, int dst_w, int dst_h);
+
+    void PerspectiveTransformUint8(const uint8_t *src, int src_w, int src_h, int stride,
+                                   const float *src_points, uint8_t *dst, int dst_w, int dst_h);
 
 }  // namespace ppocrv5::image_utils
 

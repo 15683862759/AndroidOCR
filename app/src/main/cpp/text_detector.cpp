@@ -53,10 +53,10 @@ namespace ppocrv5 {
     namespace {
 
         constexpr int kDetInputSize = 640;
-        constexpr float kBinaryThreshold = 0.2f;
-        constexpr float kBoxThreshold = 0.15f;
-        constexpr float kMinBoxArea = 3.0f;
-        constexpr float kUnclipRatio = 1.6f;
+        constexpr float kBinaryThreshold = 0.1f;
+        constexpr float kBoxThreshold = 0.3f;
+        constexpr float kMinBoxArea = 50.0f;
+        constexpr float kUnclipRatio = 1.5f;
 
         litert::HwAccelerators ToLiteRtAccelerator(AcceleratorType type) {
             switch (type) {
@@ -90,10 +90,8 @@ namespace ppocrv5 {
         std::vector<litert::TensorBuffer> input_buffers_;
         std::vector<litert::TensorBuffer> output_buffers_;
 
-        // Letterbox parameters
-        float letterbox_scale_ = 1.0f;
-        int pad_w_ = 0;
-        int pad_h_ = 0;
+        float scale_x_ = 1.0f;
+        float scale_y_ = 1.0f;
 
         // Pre-allocated buffers with cache-line alignment
         alignas(64) std::vector<uint8_t> resized_buffer_;
@@ -235,7 +233,7 @@ namespace ppocrv5 {
 
             LiteRtTensorBufferRequirements output_requirements = nullptr;
             status = LiteRtGetCompiledModelOutputBufferRequirements(
-                    c_model, /*signature_index=*/0, /*input_index=*/0, &output_requirements);
+                    c_model, /*signature_index=*/0, /*output_index=*/0, &output_requirements);
             if (status != kLiteRtStatusOk || output_requirements == nullptr) {
                 LOGE(TAG, "Failed to get output buffer requirements: %d", status);
                 return false;
@@ -267,10 +265,11 @@ namespace ppocrv5 {
                                         float *detection_time_ms) {
             auto start_time = std::chrono::high_resolution_clock::now();
 
-            // Logic Fix: Use Letterbox to prevent aspect ratio distortion
-            image_utils::ResizeLetterbox(image_data, width, height, stride,
-                                         resized_buffer_.data(), kDetInputSize, kDetInputSize,
-                                         letterbox_scale_, pad_w_, pad_h_);
+            scale_x_ = static_cast<float>(width) / kDetInputSize;
+            scale_y_ = static_cast<float>(height) / kDetInputSize;
+
+            image_utils::ResizeBilinear(image_data, width, height, stride,
+                                        resized_buffer_.data(), kDetInputSize, kDetInputSize);
 
             if (input_is_quantized_) {
                 PrepareQuantizedInput();
@@ -306,36 +305,70 @@ namespace ppocrv5 {
             const int total_pixels = kDetInputSize * kDetInputSize;
             float *prob_map = prob_map_.data();
 
+            float min_val = prob_map[0], max_val = prob_map[0];
+            float sum_val = 0.0f;
+            int above_threshold = 0;
+            for (int i = 0; i < total_pixels; ++i) {
+                float v = prob_map[i];
+                min_val = std::min(min_val, v);
+                max_val = std::max(max_val, v);
+                sum_val += v;
+                if (v > kBinaryThreshold) above_threshold++;
+            }
+            LOGD(TAG, "Prob map stats: min=%.4f, max=%.4f, mean=%.6f, above_threshold=%d",
+                 min_val, max_val, sum_val / total_pixels, above_threshold);
+
             BinarizeOutput(prob_map, total_pixels);
 
+            auto postprocess_start = std::chrono::high_resolution_clock::now();
             auto contours = postprocess::FindContours(binary_map_.data(),
                                                       kDetInputSize, kDetInputSize);
+
+            auto contours_end = std::chrono::high_resolution_clock::now();
+            auto contours_duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                    contours_end - postprocess_start);
+            LOGD(TAG, "FindContours: %zu contours in %.2f ms",
+                 contours.size(), contours_duration.count() / 1000.0f);
 
             std::vector<RotatedRect> boxes;
             boxes.reserve(contours.size());
 
-            const float inv_scale = 1.0f / letterbox_scale_;
+            int skipped_small_contour = 0;
+            int skipped_small_rect = 0;
+            int skipped_low_score = 0;
 
             for (const auto &contour: contours) {
-                if (contour.size() < 4) continue;
+                if (contour.size() < 4) {
+                    skipped_small_contour++;
+                    continue;
+                }
 
                 RotatedRect rect = postprocess::MinAreaRect(contour);
-                if (rect.width < 1.0f || rect.height < 1.0f) continue;
+                if (rect.width < 1.0f || rect.height < 1.0f) {
+                    skipped_small_rect++;
+                    continue;
+                }
 
                 float box_score = CalculateBoxScore(contour, prob_map);
-                if (box_score < kBoxThreshold) continue;
+                if (box_score < kBoxThreshold) {
+                    skipped_low_score++;
+                    continue;
+                }
 
                 UnclipBox(rect, kUnclipRatio);
 
-                // Logic Fix: Map coordinates back to original image correctly (un-pad and un-scale)
-                rect.center_x = (rect.center_x - pad_w_) * inv_scale;
-                rect.center_y = (rect.center_y - pad_h_) * inv_scale;
-                rect.width *= inv_scale;
-                rect.height *= inv_scale;
+                rect.center_x *= scale_x_;
+                rect.center_y *= scale_y_;
+                rect.width *= scale_x_;
+                rect.height *= scale_y_;
                 rect.confidence = box_score;
 
                 boxes.push_back(rect);
             }
+
+            LOGD(TAG, "Box filtering: skipped_small_contour=%d, skipped_small_rect=%d, "
+                      "skipped_low_score=%d, passed=%zu",
+                 skipped_small_contour, skipped_small_rect, skipped_low_score, boxes.size());
 
             auto filtered_boxes = postprocess::FilterAndSortBoxes(boxes, kBoxThreshold, kMinBoxArea);
 
@@ -345,6 +378,9 @@ namespace ppocrv5 {
             if (detection_time_ms) {
                 *detection_time_ms = duration.count() / 1000.0f;
             }
+
+            LOGD(TAG, "Detection completed: %zu boxes in %.2f ms",
+                 filtered_boxes.size(), duration.count() / 1000.0f);
 
             return filtered_boxes;
         }
