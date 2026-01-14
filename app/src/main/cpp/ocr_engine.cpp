@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <chrono>
 #include <numeric>
+#include <fstream>
+#include <android/storage_manager.h>
+#include <sys/stat.h>
 
 #include "litert_config.h"
 #include "logging.h"
@@ -196,6 +199,23 @@ namespace ppocrv5 {
              benchmark_.detection_time_ms, benchmark_.recognition_time_ms,
              filtered_boxes.size() > 0 ? benchmark_.recognition_time_ms / filtered_boxes.size() : 0.0f,
              benchmark_.total_time_ms);
+
+        // Save results to file
+        const char* dir_path = "/storage/emulated/0/Android/data/me.fleey.ppocrv5/files/ocr";
+        mkdir(dir_path, 0777);
+        std::ofstream result_file(std::string(dir_path) + "/ocr_results.txt");
+        if (result_file.is_open()) {
+            for (const auto& result : results) {
+                result_file << "Text: " << result.text << "\n";
+                result_file << "Confidence: " << result.confidence << "\n";
+                result_file << "Box: center_x=" << result.box.center_x
+                            << ", center_y=" << result.box.center_y
+                            << ", width=" << result.box.width
+                            << ", height=" << result.box.height
+                            << ", angle=" << result.box.angle << "\n\n";
+            }
+            result_file.close();
+        }
 
         return results;
     }

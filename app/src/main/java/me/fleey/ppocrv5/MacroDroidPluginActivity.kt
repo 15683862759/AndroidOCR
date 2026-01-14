@@ -27,6 +27,9 @@ class MacroDroidPluginActivity : Activity() {
         // This activity is called when MacroDroid wants to configure the action.
         // We don't need any special configuration, so we just return OK.
         val resultIntent = Intent()
+        val bundle = Bundle()
+        resultIntent.putExtra("com.twofortyfouram.locale.intent.extra.BUNDLE", bundle)
+        resultIntent.putExtra("com.twofortyfouram.locale.intent.extra.BLURB", "Perform OCR")
         setResult(RESULT_OK, resultIntent)
         finish()
     }
