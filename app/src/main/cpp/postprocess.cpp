@@ -41,10 +41,10 @@ namespace ppocrv5::postprocess {
 
     namespace {
 
-        constexpr int kDownsampleFactor = 4;
-        constexpr int kMinComponentPixels = 3;
-        constexpr int kMaxBoundaryPoints = 200;
-        constexpr int kMaxContours = 500;
+        constexpr int kDownsampleFactor = 1;  // 关闭降采样以保留全部细节
+        constexpr int kMinComponentPixels = 50;  // 相应地增加最小像素数以过滤噪声
+        constexpr int kMaxBoundaryPoints = 150;  // 减少边界点数量，提高性能
+        constexpr int kMaxContours = 1000;  // 提高最大轮廓数量，以匹配引擎设置
 
         constexpr int kNeighborDx4[] = {1, -1, 0, 0};
         constexpr int kNeighborDy4[] = {0, 0, 1, -1};

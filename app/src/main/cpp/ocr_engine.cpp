@@ -37,9 +37,9 @@ namespace ppocrv5 {
         constexpr int kWarmupIterations = 3;
         constexpr int kWarmupImageSize = 128;
 
-        constexpr float kMinBoxArea = 100.0f;
-        constexpr float kMinConfidenceThreshold = 0.0f;
-        constexpr int kMaxBoxesPerFrame = 50;
+        constexpr float kMinBoxArea = 20.0f;
+        constexpr float kMinConfidenceThreshold = 0.3f;  // 提高最低置信度阈值，提高识别质量
+        constexpr int kMaxBoxesPerFrame = 999;  // 适当降低最大框数量，平衡性能和准确性
 
         int GetFallbackStartIndex(AcceleratorType requested) {
             switch (requested) {

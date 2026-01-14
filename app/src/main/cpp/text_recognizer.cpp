@@ -66,7 +66,7 @@ namespace ppocrv5 {
 
         constexpr int kPrefetchDistance = 256;
 
-        constexpr float kMinConfidenceThreshold = 0.1f;
+        constexpr float kMinConfidenceThreshold = 0.35f;  // 提高识别最低置信度阈值，提升识别质量
 
         litert::HwAccelerators ToLiteRtAccelerator(AcceleratorType type) {
             switch (type) {

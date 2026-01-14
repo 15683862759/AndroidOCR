@@ -53,10 +53,10 @@ namespace ppocrv5 {
     namespace {
 
         constexpr int kDetInputSize = 640;
-        constexpr float kBinaryThreshold = 0.1f;
-        constexpr float kBoxThreshold = 0.3f;
-        constexpr float kMinBoxArea = 50.0f;
-        constexpr float kUnclipRatio = 1.5f;
+        constexpr float kBinaryThreshold = 0.15f;  // 进一步降低二值化阈值，最大化召回率
+        constexpr float kBoxThreshold = 0.5f;  // 提高置信度阈值，提高准确率
+        constexpr float kMinBoxArea = 10.0f;  // 提高最小区域面积阈值，过滤过小的文本框
+        constexpr float kUnclipRatio = 1.2f;  // 降低unclip比例，使检测框更贴合
 
         litert::HwAccelerators ToLiteRtAccelerator(AcceleratorType type) {
             switch (type) {
