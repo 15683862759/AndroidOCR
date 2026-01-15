@@ -208,34 +208,87 @@ namespace ppocrv5::image_utils {
         float scale_x = static_cast<float>(src_w) / dst_w;
         float scale_y = static_cast<float>(src_h) / dst_h;
 
-        for (int y = 0; y < dst_h; ++y) {
-            float src_y = Clamp((y + 0.5f) * scale_y - 0.5f, 0.f, src_h - 1.f);
-            int y0 = static_cast<int>(src_y);
-            int y1 = std::min(y0 + 1, src_h - 1);
-            float dy = src_y - y0;
+        if (scale_x < 1.0f || scale_y < 1.0f) { // Upscaling
+          for (int y = 0; y < dst_h; ++y) {
+              float src_y = Clamp((y + 0.5f) * scale_y - 0.5f, 0.f, src_h - 1.f);
+              int y0 = static_cast<int>(src_y);
+              int y1 = std::min(y0 + 1, src_h - 1);
+              float dy = src_y - y0;
 
-            const uint8_t *row0 = src + y0 * src_stride;
-            const uint8_t *row1 = src + y1 * src_stride;
-            uint8_t *dst_row = dst + y * dst_w * 4;
+              const uint8_t *row0 = src + y0 * src_stride;
+              const uint8_t *row1 = src + y1 * src_stride;
+              uint8_t *dst_row = dst + y * dst_w * 4;
 
-            for (int x = 0; x < dst_w; ++x) {
-                float src_x = Clamp((x + 0.5f) * scale_x - 0.5f, 0.f, src_w - 1.f);
-                int x0 = static_cast<int>(src_x);
-                int x1 = std::min(x0 + 1, src_w - 1);
-                float dx = src_x - x0;
+              for (int x = 0; x < dst_w; ++x) {
+                  float src_x = Clamp((x + 0.5f) * scale_x - 0.5f, 0.f, src_w - 1.f);
+                  int x0 = static_cast<int>(src_x);
+                  int x1 = std::min(x0 + 1, src_w - 1);
+                  float dx = src_x - x0;
 
-                float w00 = (1.0f - dx) * (1.0f - dy);
-                float w01 = dx * (1.0f - dy);
-                float w10 = (1.0f - dx) * dy;
-                float w11 = dx * dy;
+                  float w00 = (1.0f - dx) * (1.0f - dy);
+                  float w01 = dx * (1.0f - dy);
+                  float w10 = (1.0f - dx) * dy;
+                  float w11 = dx * dy;
 
-                uint8_t *out = dst_row + x * 4;
-                for (int c = 0; c < 3; ++c) {
-                    float v = row0[x0 * 4 + c] * w00 + row0[x1 * 4 + c] * w01 +
-                              row1[x0 * 4 + c] * w10 + row1[x1 * 4 + c] * w11;
-                    out[c] = static_cast<uint8_t>(Clamp(v, 0.f, 255.f));
+                  uint8_t *out = dst_row + x * 4;
+                  for (int c = 0; c < 3; ++c) {
+                      float v = row0[x0 * 4 + c] * w00 + row0[x1 * 4 + c] * w01 +
+                                row1[x0 * 4 + c] * w10 + row1[x1 * 4 + c] * w11;
+                      out[c] = static_cast<uint8_t>(Clamp(v, 0.f, 255.f));
+                  }
+                  out[3] = 255;
+              }
+          }
+        } else { // Downscaling
+            for (int y = 0; y < dst_h; ++y) {
+                float y_start_f = y * scale_y;
+                float y_end_f = (y + 1) * scale_y;
+                int y_start = static_cast<int>(y_start_f);
+                int y_end = std::min(static_cast<int>(std::ceil(y_end_f)), src_h);
+                uint8_t *dst_row = dst + y * dst_w * 4;
+
+                for (int x = 0; x < dst_w; ++x) {
+                    float x_start_f = x * scale_x;
+                    float x_end_f = (x + 1) * scale_x;
+                    int x_start = static_cast<int>(x_start_f);
+                    int x_end = std::min(static_cast<int>(std::ceil(x_end_f)), src_w);
+
+                    float total_r = 0, total_g = 0, total_b = 0, total_weight = 0;
+
+                    for (int sy = y_start; sy < y_end; ++sy) {
+                        float y_weight = 1.0f;
+                        if (sy < y_start_f) y_weight = 1.0f - (y_start_f - sy);
+                        if (sy + 1 > y_end_f) y_weight -= (sy + 1 - y_end_f);
+                        y_weight = std::max(0.0f, y_weight);
+
+                        const uint8_t *row = src + sy * src_stride;
+
+                        for (int sx = x_start; sx < x_end; ++sx) {
+                            float x_weight = 1.0f;
+                            if (sx < x_start_f) x_weight = 1.0f - (x_start_f - sx);
+                            if (sx + 1 > x_end_f) x_weight -= (sx + 1 - x_end_f);
+                            x_weight = std::max(0.0f, x_weight);
+
+                            float weight = x_weight * y_weight;
+                            if (weight > 1e-6f) {
+                                const uint8_t* pixel = row + sx * 4;
+                                total_r += pixel[0] * weight;
+                                total_g += pixel[1] * weight;
+                                total_b += pixel[2] * weight;
+                                total_weight += weight;
+                            }
+                        }
+                    }
+                    uint8_t *out = dst_row + x * 4;
+                    if (total_weight > 1e-6f) {
+                      out[0] = static_cast<uint8_t>(Clamp(total_r / total_weight, 0.f, 255.f));
+                      out[1] = static_cast<uint8_t>(Clamp(total_g / total_weight, 0.f, 255.f));
+                      out[2] = static_cast<uint8_t>(Clamp(total_b / total_weight, 0.f, 255.f));
+                    } else {
+                      out[0] = out[1] = out[2] = 0;
+                    }
+                    out[3] = 255;
                 }
-                out[3] = 255;
             }
         }
     }
